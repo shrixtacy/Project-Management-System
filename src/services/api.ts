@@ -211,26 +211,25 @@ export async function updateProject(id: string, data: Partial<Project>): Promise
 }
 
 export async function deleteProject(id: string): Promise<boolean> {
-  // First, find all files for this project to delete from Cloudinary
+  // Delete from Supabase first — cascades to stages, deliverables, tasks, comments
+  const { error } = await supabase.from('projects').delete().eq('id', id);
+  if (error) throw new Error(error.message);
+
+  // Best-effort Cloudinary cleanup — never blocks or throws
   try {
     const deliverables = await getDeliverablesByProject(id);
     const urls = deliverables.map(d => d.fileUrl).filter(url => url.includes('cloudinary.com'));
-    
     if (urls.length > 0) {
-      const res = await fetch(`${BACKEND_URL}/upload/delete-files`, {
+      fetch(`${BACKEND_URL}/upload/delete-files`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ urls })
-      });
-      if (!res.ok) console.error("Failed to clear Cloudinary files");
+      }).catch(err => console.warn("Cloudinary cleanup failed (non-critical):", err));
     }
   } catch (err) {
-    console.error("Error clearing files before project deletion:", err);
+    console.warn("Could not fetch deliverables for Cloudinary cleanup (non-critical):", err);
   }
 
-  // Then delete the project from Supabase (which cascades the tables)
-  const { error } = await supabase.from('projects').delete().eq('id', id);
-  if (error) throw error;
   return true;
 }
 
