@@ -211,11 +211,23 @@ export async function updateProject(id: string, data: Partial<Project>): Promise
 }
 
 export async function deleteProject(id: string): Promise<boolean> {
-  // Delete from Supabase first — cascades to stages, deliverables, tasks, comments
-  const { error } = await supabase.from('projects').delete().eq('id', id);
-  if (error) throw new Error(error.message);
+  // Route through backend using service role key to bypass RLS
+  const { data: sessionData } = await supabase.auth.getSession();
+  if (!sessionData?.session) throw new Error('Not authenticated');
 
-  // Best-effort Cloudinary cleanup — never blocks or throws
+  const res = await fetch(`${BACKEND_URL}/upload/delete-project`, {
+    method: 'DELETE',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${sessionData.session.access_token}`
+    },
+    body: JSON.stringify({ projectId: id })
+  });
+
+  const result = await res.json();
+  if (!res.ok) throw new Error(result.error || 'Failed to delete project');
+
+  // Best-effort Cloudinary cleanup — fire and forget
   try {
     const deliverables = await getDeliverablesByProject(id);
     const urls = deliverables.map(d => d.fileUrl).filter(url => url.includes('cloudinary.com'));
@@ -224,10 +236,10 @@ export async function deleteProject(id: string): Promise<boolean> {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ urls })
-      }).catch(err => console.warn("Cloudinary cleanup failed (non-critical):", err));
+      }).catch(err => console.warn('Cloudinary cleanup failed (non-critical):', err));
     }
   } catch (err) {
-    console.warn("Could not fetch deliverables for Cloudinary cleanup (non-critical):", err);
+    console.warn('Could not fetch deliverables for Cloudinary cleanup (non-critical):', err);
   }
 
   return true;

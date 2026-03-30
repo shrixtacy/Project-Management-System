@@ -6,6 +6,7 @@ import multer from 'multer';
 import axios from 'axios';
 import path from 'path';
 import { PassThrough } from 'stream';
+import { createClient } from '@supabase/supabase-js';
 
 const app = express();
 app.use(cors());
@@ -16,6 +17,24 @@ cloudinary.config({
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
+
+// Service role client — bypasses RLS for admin operations
+const supabaseAdmin = createClient(
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
+  { auth: { autoRefreshToken: false, persistSession: false } }
+);
+
+// Middleware: verify the caller is an authenticated ADMIN
+const requireAdmin = async (req: any, res: any, next: any) => {
+  const token = req.headers.authorization?.replace('Bearer ', '');
+  if (!token) return res.status(401).json({ error: 'Missing token' });
+  const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
+  if (error || !user) return res.status(401).json({ error: 'Invalid token' });
+  const { data: userData } = await supabaseAdmin.from('users').select('role').eq('id', user.id).single();
+  if (!userData || userData.role !== 'ADMIN') return res.status(403).json({ error: 'Forbidden' });
+  next();
+};
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -150,6 +169,21 @@ app.post('/api/upload/delete-files', async (req, res) => {
     if (others.length > 0) await cloudinary.api.delete_resources(others);
 
     res.status(200).json({ message: 'Deleted' });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// DELETE /api/upload/delete-project — delete project using service role (bypasses RLS)
+app.delete('/api/upload/delete-project', requireAdmin, async (req, res) => {
+  try {
+    const { projectId } = req.body;
+    if (!projectId) return res.status(400).json({ error: 'Missing projectId' });
+
+    const { error } = await supabaseAdmin.from('projects').delete().eq('id', projectId);
+    if (error) return res.status(500).json({ error: error.message });
+
+    res.status(200).json({ message: 'Project deleted' });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
