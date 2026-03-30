@@ -214,13 +214,17 @@ export async function deleteProject(id: string): Promise<boolean> {
   const { data: sessionData } = await supabase.auth.getSession();
   if (!sessionData?.session) throw new Error('Not authenticated');
 
-  // Use relative URL so it hits the Vercel serverless function in production
-  // and falls back to BACKEND_URL only for local dev
-  const deleteUrl = import.meta.env.PROD
-    ? `/api/auth/delete-project/${id}`
-    : `${BACKEND_URL}/auth/delete-project/${id}`;
+  // Fetch deliverables BEFORE deleting the project so Cloudinary cleanup still works
+  let cloudinaryUrls: string[] = [];
+  try {
+    const deliverables = await getDeliverablesByProject(id);
+    cloudinaryUrls = deliverables.map(d => d.fileUrl).filter(url => url.includes('cloudinary.com'));
+  } catch (err) {
+    console.warn('Could not fetch deliverables for Cloudinary cleanup (non-critical):', err);
+  }
 
-  const res = await fetch(deleteUrl, {
+  // Always use a relative path — works on Vercel (serverless) and local dev via Vite proxy
+  const res = await fetch(`/api/auth/delete-project/${id}`, {
     method: 'DELETE',
     headers: {
       'Authorization': `Bearer ${sessionData.session.access_token}`
@@ -231,18 +235,12 @@ export async function deleteProject(id: string): Promise<boolean> {
   if (!res.ok) throw new Error(result.error || 'Failed to delete project');
 
   // Best-effort Cloudinary cleanup — fire and forget
-  try {
-    const deliverables = await getDeliverablesByProject(id);
-    const urls = deliverables.map(d => d.fileUrl).filter(url => url.includes('cloudinary.com'));
-    if (urls.length > 0) {
-      fetch(`${BACKEND_URL}/upload/delete-files`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ urls })
-      }).catch(err => console.warn('Cloudinary cleanup failed (non-critical):', err));
-    }
-  } catch (err) {
-    console.warn('Could not fetch deliverables for Cloudinary cleanup (non-critical):', err);
+  if (cloudinaryUrls.length > 0) {
+    fetch('/api/upload/delete-files', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ urls: cloudinaryUrls })
+    }).catch(err => console.warn('Cloudinary cleanup failed (non-critical):', err));
   }
 
   return true;
