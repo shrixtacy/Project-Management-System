@@ -56,13 +56,17 @@ const AdminProjects = () => {
   const handleDelete = async (e: React.MouseEvent, p: typeof projects[0]) => {
     e.stopPropagation();
     if (!window.confirm(`Are you sure you want to completely delete "${p.title}"? This cannot be undone and will delete all stages and deliverables.`)) return;
+    const loadingToast = toast.loading('Deleting project...');
     try {
       await deleteProject(p.id);
       await addAuditLog(user.id, user.name, null, 'Deleted project', 'Project', p.title);
-      toast.success(`Project deleted`);
+      toast.dismiss(loadingToast);
+      toast.success('Project deleted');
       queryClient.invalidateQueries({ queryKey: ['projects'] });
     } catch (err: any) {
-      toast.error(err?.message || 'Failed to delete project');
+      console.error('Delete project error:', err);
+      toast.dismiss(loadingToast);
+      toast.error(`Delete failed: ${err?.message || 'Unknown error'}`);
     }
   };
 
