@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { getUsers, createUser, updateUser, addAuditLog } from '@/services/api';
+import { getUsers, createUser, updateUser, addAuditLog, deleteUser } from '@/services/api';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Role } from '@/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@/components/ui/table';
@@ -10,20 +11,21 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import { Plus, UserCheck, UserX } from 'lucide-react';
+import { Plus, UserCheck, UserX, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 const AdminUsers = () => {
   const { user } = useAuth();
+  const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ name: '', email: '', password: '', role: '' as Role | '' });
-  const [, setRefresh] = useState(0);
+  const [creating, setCreating] = useState(false);
 
   if (!user) return null;
 
-  const users = getUsers();
+  const { data: users = [] } = useQuery({ queryKey: ['users'], queryFn: () => getUsers() });
 
-  const handleCreate = () => {
+  const handleCreate = async () => {
     if (!form.name || !form.email || !form.password || !form.role) {
       toast.error('All fields are required');
       return;
@@ -32,19 +34,38 @@ const AdminUsers = () => {
       toast.error('Email already exists');
       return;
     }
-    createUser({ name: form.name, email: form.email, password: form.password, role: form.role as Role });
-    addAuditLog(user.id, user.name, null, 'Created user', 'User', form.name);
-    toast.success('User created');
-    setOpen(false);
-    setForm({ name: '', email: '', password: '', role: '' });
-    setRefresh(r => r + 1);
+    setCreating(true);
+    try {
+      await createUser({ name: form.name, email: form.email, password: form.password, role: form.role as Role });
+      await addAuditLog(user.id, user.name, null, 'Created user', 'User', form.name);
+      toast.success(`User ${form.name} created successfully`);
+      setOpen(false);
+      setForm({ name: '', email: '', password: '', role: '' });
+      queryClient.invalidateQueries({ queryKey: ['users'] });
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to create user');
+    } finally {
+      setCreating(false);
+    }
   };
 
   const toggleActive = (u: typeof users[0]) => {
     updateUser(u.id, { isActive: !u.isActive });
     addAuditLog(user.id, user.name, null, u.isActive ? 'Deactivated user' : 'Activated user', 'User', u.name);
     toast.success(`User ${u.isActive ? 'deactivated' : 'activated'}`);
-    setRefresh(r => r + 1);
+    queryClient.invalidateQueries({ queryKey: ['users'] });
+  };
+
+  const handleDelete = async (u: typeof users[0]) => {
+    if (!window.confirm(`Are you sure you want to completely delete ${u.name}? This cannot be undone and will fail if they are assigned to any projects.`)) return;
+    try {
+      await deleteUser(u.id);
+      await addAuditLog(user.id, user.name, null, 'Deleted user', 'User', u.name);
+      toast.success(`User ${u.name} deleted successfully`);
+      queryClient.invalidateQueries({ queryKey: ['users'] });
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to delete user');
+    }
   };
 
   const roleBadgeColor: Record<Role, string> = {
@@ -85,7 +106,7 @@ const AdminUsers = () => {
                   </SelectContent>
                 </Select>
               </div>
-              <Button onClick={handleCreate} className="w-full bg-secondary text-secondary-foreground hover:bg-secondary/90">Create User</Button>
+              <Button onClick={handleCreate} disabled={creating} className="w-full bg-secondary text-secondary-foreground hover:bg-secondary/90">{creating ? 'Creating...' : 'Create User'}</Button>
             </div>
           </DialogContent>
         </Dialog>
@@ -114,9 +135,12 @@ const AdminUsers = () => {
                       {u.isActive ? 'Active' : 'Inactive'}
                     </Badge>
                   </TableCell>
-                  <TableCell className="text-right">
-                    <Button variant="ghost" size="sm" onClick={() => toggleActive(u)}>
+                  <TableCell className="text-right flex items-center justify-end gap-2">
+                    <Button variant="ghost" size="sm" onClick={() => toggleActive(u)} title={u.isActive ? "Deactivate User" : "Activate User"}>
                       {u.isActive ? <UserX className="w-4 h-4 text-destructive" /> : <UserCheck className="w-4 h-4 text-status-approved" />}
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => handleDelete(u)} title="Delete User">
+                      <Trash2 className="w-4 h-4 text-muted-foreground hover:text-destructive transition-colors" />
                     </Button>
                   </TableCell>
                 </TableRow>

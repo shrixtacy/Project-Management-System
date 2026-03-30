@@ -3,22 +3,20 @@ import { useNavigate } from 'react-router-dom';
 import { Bell, LogOut } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { getUnreadCount } from '@/services/api';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import NotificationsPanel from '@/components/NotificationsPanel';
 
 const AppHeader = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
-  const [unread, setUnread] = useState(0);
   const [showNotifications, setShowNotifications] = useState(false);
-
-  useEffect(() => {
-    if (!user) return;
-    const update = () => setUnread(getUnreadCount(user.id));
-    update();
-    const interval = setInterval(update, 2000);
-    return () => clearInterval(interval);
-  }, [user]);
+  const { data: unread = 0 } = useQuery({ 
+    queryKey: ['unread', user?.id], 
+    queryFn: () => getUnreadCount(user!.id),
+    enabled: !!user,
+    refetchInterval: 2000 
+  });
 
   if (!user) return null;
 

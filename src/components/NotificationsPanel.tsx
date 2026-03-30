@@ -1,5 +1,6 @@
 import { useAuth } from '@/contexts/AuthContext';
 import { getNotifications, markNotificationRead, markAllNotificationsRead } from '@/services/api';
+import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { X, CheckCheck } from 'lucide-react';
@@ -15,7 +16,7 @@ const NotificationsPanel = ({ onClose }: NotificationsPanelProps) => {
 
   if (!user) return null;
 
-  const notifications = getNotifications(user.id);
+  const { data: notifications = [] } = useQuery({ queryKey: ['notifications', user.id], queryFn: () => getNotifications(user.id) });
 
   const handleClick = (id: string, link: string | null) => {
     markNotificationRead(id);

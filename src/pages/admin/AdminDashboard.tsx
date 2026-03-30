@@ -1,5 +1,6 @@
 import { useAuth } from '@/contexts/AuthContext';
 import { getProjects, getUsers, getAuditLogs } from '@/services/api';
+import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import KPICard from '@/components/KPICard';
 import { ProjectStatusBadge } from '@/components/StatusBadges';
@@ -14,9 +15,10 @@ const AdminDashboard = () => {
 
   if (!user) return null;
 
-  const projects = getProjects();
-  const users = getUsers();
-  const auditLogs = getAuditLogs().slice(0, 10);
+  const { data: projects = [] } = useQuery({ queryKey: ['projects'], queryFn: () => getProjects() });
+  const { data: users = [] } = useQuery({ queryKey: ['users'], queryFn: () => getUsers() });
+  const { data: _auditLogs = [] } = useQuery({ queryKey: ['auditLogs'], queryFn: () => getAuditLogs() });
+  const auditLogs = _auditLogs.slice(0, 10);
 
   const designCount = projects.filter(p => p.status === 'DESIGN').length;
   const opsCount = projects.filter(p => p.status === 'OPERATIONS').length;

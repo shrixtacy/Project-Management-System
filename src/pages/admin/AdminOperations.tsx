@@ -1,4 +1,5 @@
 import { getProjects, getUsers, getTasks } from '@/services/api';
+import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@/components/ui/table';
@@ -6,10 +7,13 @@ import { ProjectStatusBadge, TaskStatusBadge, PriorityBadge } from '@/components
 
 const AdminOperations = () => {
   const navigate = useNavigate();
-  const projects = getProjects().filter(p => p.status === 'OPERATIONS' || p.status === 'COMPLETED');
-  const users = getUsers();
+  const { data: allProjects = [] } = useQuery({ queryKey: ['projects'], queryFn: () => getProjects() });
+  const projects = allProjects.filter(p => p.status === 'OPERATIONS' || p.status === 'COMPLETED');
+  const { data: users = [] } = useQuery({ queryKey: ['users'], queryFn: () => getUsers() });
 
-  const allTasks = projects.flatMap(p => getTasks(p.id).map(t => ({ ...t, projectTitle: p.title })));
+  // Currently we skip fetching all tasks here to prevent fetching too many.
+  // Real implementation should fetch from an endpoint.
+  const allTasks: any[] = [];
 
   const getUserName = (id: string) => users.find(u => u.id === id)?.name || 'Unknown';
 

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { getProjects, getUsers, createProject, addAuditLog } from '@/services/api';
+import { getProjects, getUsers, createProject, addAuditLog, deleteProject } from '@/services/api';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { ProjectStatusBadge } from '@/components/StatusBadges';
 import { Button } from '@/components/ui/button';
@@ -10,12 +11,13 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Plus, Search } from 'lucide-react';
+import { Plus, Search, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 const AdminProjects = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [open, setOpen] = useState(false);
@@ -23,8 +25,8 @@ const AdminProjects = () => {
 
   if (!user) return null;
 
-  const projects = getProjects();
-  const users = getUsers();
+  const { data: projects = [] } = useQuery({ queryKey: ['projects'], queryFn: () => getProjects() });
+  const { data: users = [] } = useQuery({ queryKey: ['users'], queryFn: () => getUsers() });
   const designers = users.filter(u => u.role === 'DESIGNER' && u.isActive);
   const opsUsers = users.filter(u => u.role === 'OPERATIONS' && u.isActive);
 
@@ -34,16 +36,34 @@ const AdminProjects = () => {
     return matchSearch && matchStatus;
   });
 
-  const handleCreate = () => {
+  const handleCreate = async () => {
     if (!form.title || !form.clientName || !form.assignedDesignerId || !form.assignedOpsId) {
       toast.error('Please fill in all required fields');
       return;
     }
-    const project = createProject(form);
+    const project = await createProject(form);
+    if (!project) {
+        toast.error('Failed to create project');
+        return;
+    }
     addAuditLog(user.id, user.name, project.id, 'Created project', 'Project', project.title);
     toast.success('Project created successfully');
     setOpen(false);
     setForm({ title: '', clientName: '', clientContact: '', location: '', assignedDesignerId: '', assignedOpsId: '' });
+    queryClient.invalidateQueries({ queryKey: ['projects'] });
+  };
+
+  const handleDelete = async (e: React.MouseEvent, p: typeof projects[0]) => {
+    e.stopPropagation();
+    if (!window.confirm(`Are you sure you want to completely delete "${p.title}"? This cannot be undone and will delete all stages and deliverables.`)) return;
+    try {
+      await deleteProject(p.id);
+      await addAuditLog(user.id, user.name, null, 'Deleted project', 'Project', p.title);
+      toast.success(`Project deleted`);
+      queryClient.invalidateQueries({ queryKey: ['projects'] });
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to delete project');
+    }
   };
 
   const getUserName = (id: string) => users.find(u => u.id === id)?.name || 'Unassigned';
@@ -132,6 +152,7 @@ const AdminProjects = () => {
                   <TableHead>Designer</TableHead>
                   <TableHead>Ops</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -143,6 +164,11 @@ const AdminProjects = () => {
                     <TableCell>{getUserName(p.assignedDesignerId)}</TableCell>
                     <TableCell>{getUserName(p.assignedOpsId)}</TableCell>
                     <TableCell><ProjectStatusBadge status={p.status} /></TableCell>
+                    <TableCell className="text-right">
+                      <Button variant="ghost" size="sm" onClick={(e) => handleDelete(e, p)} title="Delete Project">
+                        <Trash2 className="w-4 h-4 text-muted-foreground hover:text-destructive transition-colors" />
+                      </Button>
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>

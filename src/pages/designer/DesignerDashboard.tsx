@@ -1,17 +1,37 @@
 import { useAuth } from '@/contexts/AuthContext';
 import { getProjects, getStages } from '@/services/api';
+import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent } from '@/components/ui/card';
 import { StageStatusBadge, ProjectStatusBadge } from '@/components/StatusBadges';
 import StageStepper from '@/components/StageStepper';
 
+const ProjectCard = ({ p }: { p: any }) => {
+  const navigate = useNavigate();
+  const { data: stages = [] } = useQuery({ queryKey: ['stages', p.id], queryFn: () => getStages(p.id) });
+  
+  return (
+    <Card className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => navigate(`/designer/projects/${p.id}`)}>
+      <CardContent className="p-5">
+        <div className="flex items-start justify-between mb-4">
+          <div>
+            <h3 className="font-display font-semibold text-foreground">{p.title}</h3>
+            <p className="text-sm text-muted-foreground">{p.clientName} · {p.location}</p>
+          </div>
+          <ProjectStatusBadge status={p.status} />
+        </div>
+        <StageStepper stages={stages} />
+      </CardContent>
+    </Card>
+  );
+};
+
 const DesignerDashboard = () => {
   const { user } = useAuth();
-  const navigate = useNavigate();
 
   if (!user) return null;
 
-  const projects = getProjects('DESIGNER', user.id);
+  const { data: projects = [] } = useQuery({ queryKey: ['projects', 'DESIGNER', user.id], queryFn: () => getProjects('DESIGNER', user.id) });
 
   return (
     <div className="space-y-6">
@@ -28,23 +48,9 @@ const DesignerDashboard = () => {
         </Card>
       ) : (
         <div className="space-y-4">
-          {projects.map(p => {
-            const stages = getStages(p.id);
-            return (
-              <Card key={p.id} className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => navigate(`/designer/projects/${p.id}`)}>
-                <CardContent className="p-5">
-                  <div className="flex items-start justify-between mb-4">
-                    <div>
-                      <h3 className="font-display font-semibold text-foreground">{p.title}</h3>
-                      <p className="text-sm text-muted-foreground">{p.clientName} · {p.location}</p>
-                    </div>
-                    <ProjectStatusBadge status={p.status} />
-                  </div>
-                  <StageStepper stages={stages} />
-                </CardContent>
-              </Card>
-            );
-          })}
+          {projects.map(p => (
+            <ProjectCard key={p.id} p={p} />
+          ))}
         </div>
       )}
     </div>

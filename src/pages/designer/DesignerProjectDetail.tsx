@@ -1,3 +1,4 @@
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
@@ -14,54 +15,86 @@ import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import { Upload, FileText, Send, ArrowRight, MessageSquare } from 'lucide-react';
+import { Upload, FileText, Send, ArrowRight, MessageSquare, Download } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
+import { downloadDeliverable } from '@/utils/download';
 
 const DesignerProjectDetail = () => {
+
+  const queryClient = useQueryClient();
   const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
   const [activeStageId, setActiveStageId] = useState<string | null>(null);
   const [notes, setNotes] = useState('');
   const [comment, setComment] = useState('');
   const [showHandoff, setShowHandoff] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
   const [, setRefresh] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  if (!user || !id) return null;
+  const { data: project } = useQuery({ queryKey: ['project', id], queryFn: () => getProject(id!) });
+  
+  const { data: stages = [] } = useQuery({ 
+    queryKey: ['stages', id], 
+    queryFn: () => getStages(id!),
+    enabled: !!id
+  });
 
-  const project = getProject(id);
-  if (!project) return <div className="text-center py-12 text-muted-foreground">Project not found</div>;
-
-  const stages = getStages(id);
   const activeStage = activeStageId ? stages.find(s => s.id === activeStageId) : stages.find(s => s.status === 'IN_PROGRESS') || stages[0];
   if (!activeStageId && activeStage) setTimeout(() => setActiveStageId(activeStage.id), 0);
 
-  const deliverables = activeStage ? getDeliverables(activeStage.id) : [];
-  const comments = activeStage ? getComments(activeStage.id) : [];
+  const { data: deliverables = [] } = useQuery({ 
+    queryKey: ['deliverables', activeStage?.id], 
+    queryFn: () => getDeliverables(activeStage!.id),
+    enabled: !!activeStage
+  });
+
+  const { data: comments = [] } = useQuery({ 
+    queryKey: ['comments', activeStage?.id], 
+    queryFn: () => getComments(activeStage!.id),
+    enabled: !!activeStage
+  });
+
+  if (!user || !id) return null;
+  if (!project) return <div className="text-center py-12 text-muted-foreground">Loading or Project not found</div>;
+
   const allApproved = stages.every(s => s.status === 'APPROVED');
   const canHandoff = allApproved && project.status === 'DESIGN';
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || !activeStage) return;
 
-    Array.from(files).forEach(file => {
-      const url = URL.createObjectURL(file);
-      addDeliverable({
-        stageId: activeStage.id,
-        fileName: file.name,
-        fileUrl: url,
-        fileType: file.type || file.name.split('.').pop() || 'unknown',
-        uploadedBy: user.id,
-        notes: notes || null,
-      });
-      addAuditLog(user.id, user.name, id, `Uploaded ${file.name}`, 'Deliverable', activeStage.stageName);
-    });
+    setIsUploading(true);
+    const toastId = toast.loading(`Uploading ${files.length} file(s)...`);
 
-    setNotes('');
-    toast.success(`${files.length} file(s) uploaded`);
-    setRefresh(r => r + 1);
-    if (fileInputRef.current) fileInputRef.current.value = '';
+    try {
+      const uploadPromises = Array.from(files).map(async file => {
+        await addDeliverable({
+          stageId: activeStage.id,
+          file: file,
+          uploadedBy: user.id,
+          notes: notes || undefined,
+        });
+        await addAuditLog(user.id, user.name, id, `Uploaded ${file.name}`, 'Deliverable', activeStage.stageName);
+      });
+
+      await Promise.all(uploadPromises);
+      
+      setNotes('');
+      toast.success(`${files.length} file(s) uploaded successfully`, { id: toastId });
+      
+      // Invalidate queries to refresh the list
+      queryClient.invalidateQueries({ queryKey: ['deliverables', activeStage.id] });
+      queryClient.invalidateQueries({ queryKey: ['deliverablesByProject', id] });
+      
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    } catch (error: any) {
+      console.error('Upload error:', error);
+      toast.error(`Upload failed: ${error.message}`, { id: toastId });
+    } finally {
+      setIsUploading(false);
+    }
   };
 
   const handleSubmit = () => {
@@ -133,9 +166,24 @@ const DesignerProjectDetail = () => {
                     <Upload className="w-8 h-8 mx-auto text-muted-foreground mb-2" />
                     <p className="text-sm text-muted-foreground mb-1">Drag & drop files or click to upload</p>
                     <p className="text-xs text-muted-foreground mb-3">PDF, JPG, PNG, DWG — Max 50MB</p>
-                    <Input ref={fileInputRef} type="file" multiple accept=".pdf,.jpg,.jpeg,.png,.dwg" onChange={handleFileUpload} className="max-w-xs mx-auto" />
+                    <Input 
+                      ref={fileInputRef} 
+                      type="file" 
+                      multiple 
+                      accept=".pdf,.jpg,.jpeg,.png,.dwg" 
+                      onChange={handleFileUpload} 
+                      className="max-w-xs mx-auto" 
+                      disabled={isUploading}
+                    />
                     <div className="mt-3">
-                      <Textarea placeholder="Optional notes for this upload..." value={notes} onChange={e => setNotes(e.target.value)} rows={2} className="max-w-sm mx-auto" />
+                      <Textarea 
+                        placeholder="Optional notes for this upload..." 
+                        value={notes} 
+                        onChange={e => setNotes(e.target.value)} 
+                        rows={2} 
+                        className="max-w-sm mx-auto" 
+                        disabled={isUploading}
+                      />
                     </div>
                   </div>
                 )}
@@ -147,13 +195,16 @@ const DesignerProjectDetail = () => {
                     <p className="text-sm text-muted-foreground text-center py-4 bg-muted/30 rounded">No files uploaded yet</p>
                   ) : (
                     deliverables.map(d => (
-                      <div key={d.id} className="flex items-center gap-3 p-3 bg-muted/30 rounded">
-                        <FileText className="w-4 h-4 text-secondary shrink-0" />
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-medium truncate">{d.fileName}</p>
-                          <p className="text-xs text-muted-foreground">{d.fileType} · {formatDistanceToNow(new Date(d.uploadedAt), { addSuffix: true })}</p>
-                          {d.notes && <p className="text-xs text-muted-foreground italic mt-0.5">{d.notes}</p>}
+                      <div key={d.id} className="flex items-center justify-between p-3 bg-muted/30 rounded">
+                        <div className="flex items-center gap-3">
+                          <FileText className="w-4 h-4 text-secondary shrink-0" />
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-medium truncate">{d.fileName}</p>
+                            <p className="text-xs text-muted-foreground">{d.fileType} · {formatDistanceToNow(new Date(d.uploadedAt), { addSuffix: true })}</p>
+                            {d.notes && <p className="text-xs text-muted-foreground italic mt-0.5">{d.notes}</p>}
+                          </div>
                         </div>
+                        <Button variant="ghost" size="sm" onClick={() => downloadDeliverable(d.fileUrl, d.fileName, d.fileType)}><Download className="w-4 h-4 text-muted-foreground" /></Button>
                       </div>
                     ))
                   )}

@@ -5,8 +5,8 @@ import * as api from '@/services/api';
 interface AuthContextType {
   user: User | null;
   isLoading: boolean;
-  login: (email: string, password: string) => User | null;
-  logout: () => void;
+  login: (email: string, password: string) => Promise<User | null>;
+  logout: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -16,23 +16,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    api.seedIfEmpty();
-    const stored = api.getCurrentUser();
-    setUser(stored);
-    setIsLoading(false);
-  }, []);
-
-  const login = useCallback((email: string, password: string) => {
-    const u = api.login(email, password);
-    if (u) {
-      api.setCurrentUser(u);
-      setUser(u);
+    async function loadUser() {
+      api.seedIfEmpty();
+      try {
+        const stored = await api.getCurrentUser();
+        setUser(stored);
+      } catch (err) {
+        setUser(null);
+      } finally {
+        setIsLoading(false);
+      }
     }
-    return u;
+    loadUser();
   }, []);
 
-  const logout = useCallback(() => {
-    api.logout();
+  const login = useCallback(async (email: string, password: string) => {
+    try {
+      const u = await api.login(email, password);
+      if (u) {
+        setUser(u);
+      }
+      return u;
+    } catch (e) {
+      console.error('Login failed', e);
+      return null;
+    }
+  }, []);
+
+  const logout = useCallback(async () => {
+    await api.logout();
     setUser(null);
   }, []);
 

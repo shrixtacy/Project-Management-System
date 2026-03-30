@@ -1,5 +1,6 @@
 import { useAuth } from '@/contexts/AuthContext';
 import { getProjects, getStages } from '@/services/api';
+import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent } from '@/components/ui/card';
 import { ProjectStatusBadge } from '@/components/StatusBadges';
@@ -11,7 +12,7 @@ const OpsDashboard = () => {
 
   if (!user) return null;
 
-  const projects = getProjects('OPERATIONS', user.id);
+  const { data: projects = [] } = useQuery({ queryKey: ['projects', 'OPERATIONS', user.id], queryFn: () => getProjects('OPERATIONS', user.id) });
 
   return (
     <div className="space-y-6">

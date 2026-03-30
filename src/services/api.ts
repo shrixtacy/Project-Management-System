@@ -1,355 +1,466 @@
 /**
- * API Service Layer — localStorage-backed, structured for easy backend swap.
- * Replace localStorage calls with fetch('/api/...') when connecting to a real backend.
+ * API Service Layer — Supported by Supabase
  */
 import {
   User, Project, DesignStage, StageDeliverable, Comment,
-  OpsTask, AuditLog, Notification, Role, ProjectStatus,
-  StageStatus, TaskStatus, Priority, TaskCategory, STAGE_NAMES,
+  OpsTask, AuditLog, Notification, Role, StageStatus, TaskStatus, Priority, TaskCategory, STAGE_NAMES, ProjectStatus,
 } from '@/types';
+import { supabase, BACKEND_URL } from './supabaseClient';
 
-// ==================== HELPERS ====================
 const generateId = () => crypto.randomUUID();
 const now = () => new Date().toISOString();
 
-function getStore<T>(key: string): T[] {
-  try {
-    return JSON.parse(localStorage.getItem(key) || '[]');
-  } catch {
-    return [];
-  }
-}
-
-function setStore<T>(key: string, data: T[]) {
-  localStorage.setItem(key, JSON.stringify(data));
-}
-
-// ==================== SEED DATA ====================
 export function seedIfEmpty() {
-  const existingStages = getStore<DesignStage>('pms_stages');
-  if (existingStages.length > 0 && existingStages[0].stageName !== STAGE_NAMES[1]) {
-    localStorage.clear();
-  }
-
-  if (getStore<User>('pms_users').length > 0) return;
-
-  const admin: User = {
-    id: generateId(), name: 'Admin User', email: 'admin@designco.com',
-    password: 'admin123', role: 'ADMIN', isActive: true, createdAt: now(),
-  };
-  const designer: User = {
-    id: generateId(), name: 'Sarah Chen', email: 'sarah@designco.com',
-    password: 'designer123', role: 'DESIGNER', isActive: true, createdAt: now(),
-  };
-  const ops: User = {
-    id: generateId(), name: 'Mike Johnson', email: 'mike@designco.com',
-    password: 'ops123', role: 'OPERATIONS', isActive: true, createdAt: now(),
-  };
-
-  setStore('pms_users', [admin, designer, ops]);
-
-  // Seed a sample project
-  const project: Project = {
-    id: generateId(), title: 'Modern Loft Renovation', clientName: 'Acme Corp',
-    clientContact: 'john@acme.com', location: 'New York, NY', status: 'DESIGN',
-    assignedDesignerId: designer.id, assignedOpsId: ops.id,
-    handoffAcknowledged: false, createdAt: now(),
-  };
-  setStore('pms_projects', [project]);
-
-  // Seed 6 stages for the project
-  const stages: DesignStage[] = Array.from({ length: 6 }, (_, i) => ({
-    id: generateId(),
-    projectId: project.id,
-    stageNumber: i + 1,
-    stageName: STAGE_NAMES[i + 1],
-    status: i === 0 ? 'IN_PROGRESS' as StageStatus : 'LOCKED' as StageStatus,
-    completedAt: null,
-  }));
-  setStore('pms_stages', stages);
-
-  addAuditLog(admin.id, admin.name, project.id, 'Created project', 'Project', project.title);
+  // Disabling local seeding since we use real backend DB now.
 }
 
 // ==================== AUTH ====================
-// POST /api/auth/login
-export function login(email: string, password: string): User | null {
-  const users = getStore<User>('pms_users');
-  return users.find(u => u.email === email && u.password === password && u.isActive) || null;
+export async function login(email: string, password: string): Promise<User | null> {
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error || !data.user) throw error;
+  
+  const { data: userData, error: userError } = await supabase
+    .from('users')
+    .select('*')
+    .eq('id', data.user.id)
+    .single();
+
+  if (userError || !userData) throw userError;
+  return {
+    ...userData,
+    isActive: userData.is_active,
+    createdAt: userData.created_at
+  } as User;
 }
 
-// POST /api/auth/logout
-export function logout() {
-  localStorage.removeItem('pms_current_user');
+export async function logout() {
+  await supabase.auth.signOut();
 }
 
-export function setCurrentUser(user: User) {
-  localStorage.setItem('pms_current_user', JSON.stringify(user));
-}
+export async function getCurrentUser(): Promise<User | null> {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) return null;
 
-export function getCurrentUser(): User | null {
-  try {
-    return JSON.parse(localStorage.getItem('pms_current_user') || 'null');
-  } catch {
-    return null;
-  }
+  const { data: userData } = await supabase
+    .from('users')
+    .select('*')
+    .eq('id', session.user.id)
+    .single();
+
+  return {
+    ...userData,
+    isActive: userData.is_active,
+    createdAt: userData.created_at
+  } as User;
 }
 
 // ==================== USERS ====================
-// GET /api/users
-export function getUsers(): User[] {
-  return getStore<User>('pms_users');
+export async function getUsers(): Promise<User[]> {
+  const { data, error } = await supabase.from('users').select('*');
+  if (error) throw error;
+  return data.map((u: any) => ({
+    ...u,
+    isActive: u.is_active,
+    createdAt: u.created_at
+  })) as User[];
 }
 
-// POST /api/users
-export function createUser(data: Omit<User, 'id' | 'createdAt' | 'isActive'>): User {
-  const users = getStore<User>('pms_users');
-  const user: User = { ...data, id: generateId(), isActive: true, createdAt: now() };
-  users.push(user);
-  setStore('pms_users', users);
-  return user;
+export async function createUser(data: Omit<User, 'id' | 'createdAt' | 'isActive'>): Promise<User> {
+  const { data: session } = await supabase.auth.getSession();
+  if (!session?.session) throw new Error("Unauthorized");
+
+  const res = await fetch(`${BACKEND_URL}/auth/create-user`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${session.session.access_token}`
+    },
+    body: JSON.stringify(data)
+  });
+  
+  const resData = await res.json();
+  if (!res.ok) throw new Error(resData.error || 'Failed to create user');
+  
+  return resData.user;
 }
 
-// PATCH /api/users/:id
-export function updateUser(id: string, data: Partial<User>): User | null {
-  const users = getStore<User>('pms_users');
-  const idx = users.findIndex(u => u.id === id);
-  if (idx === -1) return null;
-  users[idx] = { ...users[idx], ...data };
-  setStore('pms_users', users);
-  return users[idx];
+export async function deleteUser(id: string): Promise<boolean> {
+  const { data: session } = await supabase.auth.getSession();
+  if (!session?.session) throw new Error("Unauthorized");
+
+  const res = await fetch(`${BACKEND_URL}/auth/delete-user/${id}`, {
+    method: 'DELETE',
+    headers: {
+      'Authorization': `Bearer ${session.session.access_token}`
+    }
+  });
+
+  const resData = await res.json();
+  if (!res.ok) throw new Error(resData.error || 'Failed to delete user');
+  
+  return true;
+}
+
+export async function updateUser(id: string, data: Partial<User>): Promise<User | null> {
+  const payload: any = { ...data };
+  if (data.isActive !== undefined) {
+    payload.is_active = data.isActive;
+    delete payload.isActive;
+  }
+  
+  const { data: updated, error } = await supabase
+    .from('users')
+    .update(payload)
+    .eq('id', id)
+    .select()
+    .single();
+  if (error || !updated) return null;
+  return {
+    ...updated,
+    isActive: updated.is_active,
+    createdAt: updated.created_at
+  } as User;
 }
 
 // ==================== PROJECTS ====================
-// GET /api/projects
-export function getProjects(role?: Role, userId?: string): Project[] {
-  const projects = getStore<Project>('pms_projects');
-  if (role === 'DESIGNER' && userId) return projects.filter(p => p.assignedDesignerId === userId);
-  if (role === 'OPERATIONS' && userId) return projects.filter(p => p.assignedOpsId === userId && (p.status === 'OPERATIONS' || p.status === 'COMPLETED'));
-  return projects;
-}
-
-// POST /api/projects
-export function createProject(data: Omit<Project, 'id' | 'createdAt' | 'status' | 'handoffAcknowledged'>): Project {
-  const projects = getStore<Project>('pms_projects');
-  const project: Project = { ...data, id: generateId(), status: 'DESIGN', handoffAcknowledged: false, createdAt: now() };
-  projects.push(project);
-  setStore('pms_projects', projects);
-
-  // Auto-create 6 stages
-  const stages = getStore<DesignStage>('pms_stages');
-  for (let i = 1; i <= 6; i++) {
-    stages.push({
-      id: generateId(), projectId: project.id, stageNumber: i,
-      stageName: STAGE_NAMES[i], status: i === 1 ? 'IN_PROGRESS' : 'LOCKED', completedAt: null,
-    });
+export async function getProjects(role?: Role, userId?: string): Promise<Project[]> {
+  let query = supabase.from('projects').select('*');
+  if (role === 'DESIGNER' && userId) {
+    query = query.eq('assigned_designer_id', userId);
+  } else if (role === 'OPERATIONS' && userId) {
+    query = query.eq('assigned_ops_id', userId).in('status', ['OPERATIONS', 'COMPLETED']);
   }
-  setStore('pms_stages', stages);
-  return project;
+  
+  const { data, error } = await query;
+  if (error) throw error;
+  
+  // Transform DB snake_case to camelCase
+  return data.map((p: any) => ({
+    ...p,
+    clientName: p.client_name,
+    clientContact: p.client_contact,
+    assignedDesignerId: p.assigned_designer_id,
+    assignedOpsId: p.assigned_ops_id,
+    handoffAcknowledged: p.handoff_acknowledged,
+    createdAt: p.created_at,
+  })) as Project[];
 }
 
-// GET /api/projects/:id
-export function getProject(id: string): Project | null {
-  return getStore<Project>('pms_projects').find(p => p.id === id) || null;
+export async function createProject(data: Omit<Project, 'id' | 'createdAt' | 'status' | 'handoffAcknowledged'>): Promise<Project> {
+  // First create project
+  const projectObj = {
+    title: data.title,
+    client_name: data.clientName,
+    client_contact: data.clientContact,
+    location: data.location,
+    assigned_designer_id: data.assignedDesignerId,
+    assigned_ops_id: data.assignedOpsId,
+  };
+  
+  const { data: newProj, error: proError } = await supabase
+    .from('projects')
+    .insert([projectObj])
+    .select()
+    .single();
+    
+  if (proError || !newProj) throw proError;
+
+  // Auto-create stages
+  for (let i = 1; i <= 6; i++) {
+    await supabase.from('design_stages').insert([{
+      project_id: newProj.id,
+      stage_number: i,
+      stage_name: STAGE_NAMES[i],
+      status: i === 1 ? 'IN_PROGRESS' : 'LOCKED'
+    }]);
+  }
+  return { ...newProj, clientName: newProj.client_name, clientContact: newProj.client_contact } as Project;
 }
 
-// PATCH /api/projects/:id
-export function updateProject(id: string, data: Partial<Project>): Project | null {
-  const projects = getStore<Project>('pms_projects');
-  const idx = projects.findIndex(p => p.id === id);
-  if (idx === -1) return null;
-  projects[idx] = { ...projects[idx], ...data };
-  setStore('pms_projects', projects);
-  return projects[idx];
+export async function getProject(id: string): Promise<Project | null> {
+  const { data, error } = await supabase.from('projects').select('*').eq('id', id).single();
+  if (error || !data) return null;
+  return {
+    ...data,
+    clientName: data.client_name,
+    clientContact: data.client_contact,
+    assignedDesignerId: data.assigned_designer_id,
+    assignedOpsId: data.assigned_ops_id,
+    handoffAcknowledged: data.handoff_acknowledged,
+    createdAt: data.created_at,
+  } as Project;
+}
+
+export async function updateProject(id: string, data: Partial<Project>): Promise<Project | null> {
+  const updatePayload: any = { ...data };
+  if (data.clientName) updatePayload.client_name = data.clientName;
+  if (data.clientContact) updatePayload.client_contact = data.clientContact;
+  if (data.assignedDesignerId) updatePayload.assigned_designer_id = data.assignedDesignerId;
+  if (data.assignedOpsId) updatePayload.assigned_ops_id = data.assignedOpsId;
+  if (data.handoffAcknowledged !== undefined) updatePayload.handoff_acknowledged = data.handoffAcknowledged;
+
+  const { data: updated, error } = await supabase
+    .from('projects')
+    .update(updatePayload)
+    .eq('id', id)
+    .select()
+    .single();
+    
+  if (error || !updated) return null;
+  return updated as Project; // Needs mapping ideally
+}
+
+export async function deleteProject(id: string): Promise<boolean> {
+  // First, find all files for this project to delete from Cloudinary
+  try {
+    const deliverables = await getDeliverablesByProject(id);
+    const urls = deliverables.map(d => d.fileUrl).filter(url => url.includes('cloudinary.com'));
+    
+    if (urls.length > 0) {
+      const res = await fetch(`${BACKEND_URL}/upload/delete-files`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ urls })
+      });
+      if (!res.ok) console.error("Failed to clear Cloudinary files");
+    }
+  } catch (err) {
+    console.error("Error clearing files before project deletion:", err);
+  }
+
+  // Then delete the project from Supabase (which cascades the tables)
+  const { error } = await supabase.from('projects').delete().eq('id', id);
+  if (error) throw error;
+  return true;
 }
 
 // ==================== STAGES ====================
-// GET /api/projects/:id/stages
-export function getStages(projectId: string): DesignStage[] {
-  return getStore<DesignStage>('pms_stages')
-    .filter(s => s.projectId === projectId)
-    .sort((a, b) => a.stageNumber - b.stageNumber);
+export async function getStages(projectId: string): Promise<DesignStage[]> {
+  const { data, error } = await supabase
+    .from('design_stages')
+    .select('*')
+    .eq('project_id', projectId)
+    .order('stage_number', { ascending: true });
+    
+  if (error) throw error;
+  
+  return data.map((s: any) => ({
+    id: s.id,
+    projectId: s.project_id,
+    stageNumber: s.stage_number,
+    stageName: s.stage_name,
+    status: s.status,
+    completedAt: s.completed_at
+  })) as DesignStage[];
 }
 
-// PATCH /api/projects/:id/stages/:stageId (approve/reject)
-export function approveStage(stageId: string): DesignStage | null {
-  const stages = getStore<DesignStage>('pms_stages');
-  const idx = stages.findIndex(s => s.id === stageId);
-  if (idx === -1) return null;
+export async function updateStageStatus(stageId: string, status: StageStatus): Promise<void> {
+  await supabase.from('design_stages').update({ status, completed_at: status === 'APPROVED' ? now() : null }).eq('id', stageId);
+}
 
-  stages[idx].status = 'APPROVED';
-  stages[idx].completedAt = now();
-
-  // Unlock next stage
-  const nextIdx = stages.findIndex(s => s.projectId === stages[idx].projectId && s.stageNumber === stages[idx].stageNumber + 1);
-  if (nextIdx !== -1 && stages[nextIdx].status === 'LOCKED') {
-    stages[nextIdx].status = 'IN_PROGRESS';
+export async function approveStage(stageId: string): Promise<void> {
+  await updateStageStatus(stageId, 'APPROVED');
+  // Unlock next stage logic
+  const { data: current } = await supabase.from('design_stages').select('*').eq('id', stageId).single();
+  if (current) {
+    const { data: nextStage } = await supabase
+      .from('design_stages')
+      .select('*')
+      .eq('project_id', current.project_id)
+      .eq('stage_number', current.stage_number + 1)
+      .single();
+      
+    if (nextStage && nextStage.status === 'LOCKED') {
+      await updateStageStatus(nextStage.id, 'IN_PROGRESS');
+    }
   }
-
-  setStore('pms_stages', stages);
-  return stages[idx];
 }
 
-export function rejectStage(stageId: string): DesignStage | null {
-  const stages = getStore<DesignStage>('pms_stages');
-  const idx = stages.findIndex(s => s.id === stageId);
-  if (idx === -1) return null;
-  stages[idx].status = 'IN_PROGRESS';
-  setStore('pms_stages', stages);
-  return stages[idx];
-}
-
-export function submitStageForApproval(stageId: string): DesignStage | null {
-  const stages = getStore<DesignStage>('pms_stages');
-  const idx = stages.findIndex(s => s.id === stageId);
-  if (idx === -1) return null;
-  stages[idx].status = 'PENDING_APPROVAL';
-  setStore('pms_stages', stages);
-  return stages[idx];
-}
+export async function rejectStage(stageId: string): Promise<void> { await updateStageStatus(stageId, 'IN_PROGRESS'); }
+export async function submitStageForApproval(stageId: string): Promise<void> { await updateStageStatus(stageId, 'PENDING_APPROVAL'); }
 
 // ==================== DELIVERABLES ====================
-// POST /api/projects/:id/stages/:stageId/deliverables
-export function addDeliverable(data: Omit<StageDeliverable, 'id' | 'uploadedAt'>): StageDeliverable {
-  const deliverables = getStore<StageDeliverable>('pms_deliverables');
-  const d: StageDeliverable = { ...data, id: generateId(), uploadedAt: now() };
-  deliverables.push(d);
-  setStore('pms_deliverables', deliverables);
-  return d;
+export async function addDeliverable(data: { stageId: string; file: File; notes?: string; uploadedBy: string }): Promise<StageDeliverable> {
+  const formData = new FormData();
+  formData.append('file', data.file);
+  
+  // Upload to Cloudinary via backend
+  const res = await fetch(`${BACKEND_URL}/upload`, {
+    method: 'POST',
+    body: formData
+  });
+  
+  const uploadResult = await res.json();
+  if (!res.ok) throw new Error(uploadResult.error || 'Upload failed');
+  
+  const { data: deliverable, error } = await supabase.from('deliverables').insert([{
+    stage_id: data.stageId,
+    file_name: data.file.name,
+    file_url: uploadResult.url,
+    file_type: uploadResult.format === 'zip' ? 'application/zip' : data.file.type,
+    uploaded_by: data.uploadedBy,
+    notes: data.notes || null
+  }]).select().single();
+  
+  if (error) throw error;
+  
+  return {
+    id: deliverable.id,
+    stageId: deliverable.stage_id,
+    fileName: deliverable.file_name,
+    fileUrl: deliverable.file_url,
+    fileType: deliverable.file_type,
+    uploadedBy: deliverable.uploaded_by,
+    notes: deliverable.notes,
+    uploadedAt: deliverable.uploaded_at
+  } as StageDeliverable;
 }
 
-export function getDeliverables(stageId: string): StageDeliverable[] {
-  return getStore<StageDeliverable>('pms_deliverables').filter(d => d.stageId === stageId);
+export async function getDeliverables(stageId: string): Promise<StageDeliverable[]> {
+  const { data, error } = await supabase.from('deliverables').select('*').eq('stage_id', stageId);
+  if (error) throw error;
+  return data.map((d: any) => ({
+    id: d.id, stageId: d.stage_id, fileName: d.file_name, fileUrl: d.file_url,
+    fileType: d.file_type, uploadedBy: d.uploaded_by, notes: d.notes, uploadedAt: d.uploaded_at
+  })) as StageDeliverable[];
 }
 
-export function getDeliverablesByProject(projectId: string): StageDeliverable[] {
-  const stages = getStages(projectId);
-  const stageIds = new Set(stages.map(s => s.id));
-  return getStore<StageDeliverable>('pms_deliverables').filter(d => stageIds.has(d.stageId));
+export async function getDeliverablesByProject(projectId: string): Promise<StageDeliverable[]> {
+  // First, get all stages for this project
+  const { data: stages, error: stError } = await supabase.from('design_stages').select('id').eq('project_id', projectId);
+  if (stError || !stages) return [];
+  
+  const stageIds = stages.map(s => s.id);
+  if (stageIds.length === 0) return [];
+
+  // Then fetch deliverables for those stages
+  const { data, error } = await supabase.from('deliverables').select('*').in('stage_id', stageIds);
+  if (error) throw error;
+  
+  return data.map((d: any) => ({
+    id: d.id, stageId: d.stage_id, fileName: d.file_name, fileUrl: d.file_url,
+    fileType: d.file_type, uploadedBy: d.uploaded_by, notes: d.notes, uploadedAt: d.uploaded_at
+  })) as StageDeliverable[];
 }
 
 // ==================== COMMENTS ====================
-export function addComment(data: Omit<Comment, 'id' | 'createdAt'>): Comment {
-  const comments = getStore<Comment>('pms_comments');
-  const c: Comment = { ...data, id: generateId(), createdAt: now() };
-  comments.push(c);
-  setStore('pms_comments', comments);
-  return c;
+export async function addComment(data: Omit<Comment, 'id' | 'createdAt'>): Promise<Comment> {
+  const { data: newComment, error } = await supabase.from('comments').insert([{
+    stage_id: data.stageId, user_id: data.userId, user_name: data.userName, content: data.content
+  }]).select().single();
+  
+  if (error) throw error;
+  return {
+    id: newComment.id, stageId: newComment.stage_id, userId: newComment.user_id,
+    userName: newComment.user_name, content: newComment.content, createdAt: newComment.created_at
+  } as Comment;
 }
 
-export function getComments(stageId: string): Comment[] {
-  return getStore<Comment>('pms_comments').filter(c => c.stageId === stageId).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+export async function getComments(stageId: string): Promise<Comment[]> {
+  const { data, error } = await supabase.from('comments').select('*').eq('stage_id', stageId).order('created_at', { ascending: false });
+  if (error) throw error;
+  return data.map((c: any) => ({
+    id: c.id, stageId: c.stage_id, userId: c.user_id, userName: c.user_name,
+    content: c.content, createdAt: c.created_at
+  })) as Comment[];
 }
 
 // ==================== OPS TASKS ====================
-// GET /api/projects/:id/tasks
-export function getTasks(projectId: string): OpsTask[] {
-  return getStore<OpsTask>('pms_tasks').filter(t => t.projectId === projectId);
+export async function getTasks(projectId: string): Promise<OpsTask[]> {
+  const { data, error } = await supabase.from('ops_tasks').select('*').eq('project_id', projectId);
+  if (error) throw error;
+  return data.map((t: any) => ({
+    id: t.id, projectId: t.project_id, title: t.title, description: t.description,
+    category: t.category, assignedTo: t.assigned_to, priority: t.priority,
+    status: t.status, dueDate: t.due_date, attachments: t.attachments, createdAt: t.created_at
+  })) as OpsTask[];
 }
 
-// POST /api/projects/:id/tasks
-export function createTask(data: Omit<OpsTask, 'id' | 'createdAt'>): OpsTask {
-  const tasks = getStore<OpsTask>('pms_tasks');
-  const task: OpsTask = { ...data, id: generateId(), createdAt: now() };
-  tasks.push(task);
-  setStore('pms_tasks', tasks);
-  return task;
+export async function createTask(data: Omit<OpsTask, 'id' | 'createdAt'>): Promise<OpsTask> {
+  const { data: newT, error } = await supabase.from('ops_tasks').insert([{
+    project_id: data.projectId, title: data.title, description: data.description,
+    category: data.category, assigned_to: data.assignedTo, priority: data.priority,
+    due_date: data.dueDate, attachments: data.attachments || []
+  }]).select().single();
+  
+  if (error) throw error;
+  return {
+    ...newT, projectId: newT.project_id, assignedTo: newT.assigned_to, dueDate: newT.due_date, createdAt: newT.created_at
+  } as OpsTask;
 }
 
-// PATCH /api/projects/:id/tasks/:taskId
-export function updateTask(taskId: string, data: Partial<OpsTask>): OpsTask | null {
-  const tasks = getStore<OpsTask>('pms_tasks');
-  const idx = tasks.findIndex(t => t.id === taskId);
-  if (idx === -1) return null;
-  tasks[idx] = { ...tasks[idx], ...data };
-  setStore('pms_tasks', tasks);
-  return tasks[idx];
+export async function updateTask(taskId: string, data: Partial<OpsTask>): Promise<OpsTask | null> {
+  const updatePayload: any = { ...data };
+  if (data.assignedTo) updatePayload.assigned_to = data.assignedTo;
+  if (data.dueDate !== undefined) updatePayload.due_date = data.dueDate;
+
+  const { data: updated, error } = await supabase.from('ops_tasks').update(updatePayload).eq('id', taskId).select().single();
+  if (error || !updated) return null;
+  return updated as OpsTask;
 }
 
-// DELETE /api/projects/:id/tasks/:taskId
-export function deleteTask(taskId: string): boolean {
-  const tasks = getStore<OpsTask>('pms_tasks');
-  const filtered = tasks.filter(t => t.id !== taskId);
-  if (filtered.length === tasks.length) return false;
-  setStore('pms_tasks', filtered);
-  return true;
+export async function deleteTask(taskId: string): Promise<boolean> {
+  const { error } = await supabase.from('ops_tasks').delete().eq('id', taskId);
+  return !error;
 }
 
-// ==================== P2P HANDOFF ====================
-// POST /api/projects/:id/handoff
-export function initiateHandoff(projectId: string, userId: string, userName: string): boolean {
-  const stages = getStages(projectId);
-  const allApproved = stages.every(s => s.status === 'APPROVED');
-  if (!allApproved) return false;
-
-  updateProject(projectId, { status: 'OPERATIONS' });
-
-  const project = getProject(projectId);
-  if (project) {
-    addNotification(project.assignedOpsId, 'Project Handoff', `Project "${project.title}" has been handed off to Operations.`, `/operations/projects/${projectId}`);
-    addAuditLog(userId, userName, projectId, 'Initiated P2P handoff', 'Project', project.title);
-  }
-  return true;
+// ==================== AUDIT LOGS ====================
+export async function addAuditLog(userId: string, userName: string, projectId: string | null, action: string, entity: string, details: string | null = null) {
+  await supabase.from('audit_logs').insert([{
+    user_id: userId, user_name: userName, project_id: projectId, action, entity, details
+  }]);
 }
 
-// PATCH /api/projects/:id/handoff/acknowledge
-export function acknowledgeHandoff(projectId: string, userId: string, userName: string): boolean {
-  updateProject(projectId, { handoffAcknowledged: true });
-  const project = getProject(projectId);
-  if (project) {
-    addAuditLog(userId, userName, projectId, 'Acknowledged handoff', 'Project', project.title);
-  }
-  return true;
+export async function getAuditLogs(): Promise<AuditLog[]> {
+  const { data, error } = await supabase.from('audit_logs').select('*').order('created_at', { ascending: false });
+  if (error) return [];
+  return data.map((l: any) => ({
+    id: l.id, userId: l.user_id, userName: l.user_name, projectId: l.project_id,
+    action: l.action, entity: l.entity, details: l.details, createdAt: l.created_at
+  })) as AuditLog[];
 }
 
 // ==================== NOTIFICATIONS ====================
-// GET /api/notifications
-export function getNotifications(userId: string): Notification[] {
-  return getStore<Notification>('pms_notifications')
-    .filter(n => n.userId === userId)
-    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+export async function getNotifications(userId: string): Promise<Notification[]> {
+  const { data, error } = await supabase.from('notifications').select('*').eq('user_id', userId).order('created_at', { ascending: false });
+  if (error) return [];
+  return data.map((n: any) => ({ ...n, userId: n.user_id, createdAt: n.created_at })) as Notification[];
 }
 
-export function getUnreadCount(userId: string): number {
-  return getStore<Notification>('pms_notifications').filter(n => n.userId === userId && !n.read).length;
+export async function getUnreadCount(userId: string): Promise<number> {
+  const { count } = await supabase.from('notifications').select('*', { count: 'exact', head: true }).eq('user_id', userId).eq('read', false);
+  return count || 0;
 }
 
-// PATCH /api/notifications/:id/read
-export function markNotificationRead(notificationId: string) {
-  const notifications = getStore<Notification>('pms_notifications');
-  const idx = notifications.findIndex(n => n.id === notificationId);
-  if (idx !== -1) {
-    notifications[idx].read = true;
-    setStore('pms_notifications', notifications);
+export async function markNotificationRead(notificationId: string) {
+  await supabase.from('notifications').update({ read: true }).eq('id', notificationId);
+}
+
+export async function markAllNotificationsRead(userId: string) {
+  await supabase.from('notifications').update({ read: true }).eq('user_id', userId);
+}
+
+export async function addNotification(userId: string, title: string, message: string, link: string | null = null) {
+  await supabase.from('notifications').insert([{ user_id: userId, title, message, link }]);
+}
+
+// ==================== P2P HANDOFF ====================
+export async function initiateHandoff(projectId: string, userId: string, userName: string): Promise<boolean> {
+  await supabase.from('projects').update({ status: 'OPERATIONS' }).eq('id', projectId);
+  const p = await getProject(projectId);
+  if (p) {
+    await addNotification(p.assignedOpsId, 'Project Handoff', `Project "${p.title}" handed off to Operations.`, `/operations/projects/${projectId}`);
+    await addAuditLog(userId, userName, projectId, 'Initiated P2P handoff', 'Project', p.title);
   }
+  return true;
 }
 
-export function markAllNotificationsRead(userId: string) {
-  const notifications = getStore<Notification>('pms_notifications');
-  notifications.forEach(n => { if (n.userId === userId) n.read = true; });
-  setStore('pms_notifications', notifications);
+export async function acknowledgeHandoff(projectId: string, userId: string, userName: string): Promise<boolean> {
+  await supabase.from('projects').update({ handoff_acknowledged: true }).eq('id', projectId);
+  return true;
 }
 
-export function addNotification(userId: string, title: string, message: string, link: string | null = null) {
-  const notifications = getStore<Notification>('pms_notifications');
-  notifications.push({ id: generateId(), userId, title, message, read: false, link, createdAt: now() });
-  setStore('pms_notifications', notifications);
-}
-
-// ==================== AUDIT LOG ====================
-// GET /api/audit-logs
-export function getAuditLogs(): AuditLog[] {
-  return getStore<AuditLog>('pms_audit_logs').sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-}
-
-export function addAuditLog(userId: string, userName: string, projectId: string | null, action: string, entity: string, details: string | null = null) {
-  const logs = getStore<AuditLog>('pms_audit_logs');
-  logs.push({ id: generateId(), userId, userName, projectId, action, entity, details, createdAt: now() });
-  setStore('pms_audit_logs', logs);
-}
-
-// ==================== MARK PROJECT COMPLETE ====================
-export function markProjectComplete(projectId: string, userId: string, userName: string) {
-  updateProject(projectId, { status: 'COMPLETED' });
-  addAuditLog(userId, userName, projectId, 'Marked project as completed', 'Project', '');
+export async function markProjectComplete(projectId: string, userId: string, userName: string) {
+  await supabase.from('projects').update({ status: 'COMPLETED' }).eq('id', projectId);
+  await addAuditLog(userId, userName, projectId, 'Marked project as completed', 'Project', '');
 }

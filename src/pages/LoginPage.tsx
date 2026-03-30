@@ -14,12 +14,12 @@ const LoginPage = () => {
   const { login } = useAuth();
   const navigate = useNavigate();
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
 
-    setTimeout(() => {
-      const user = login(email, password);
+    try {
+      const user = await login(email, password);
       if (user) {
         toast.success(`Welcome back, ${user.name}`);
         switch (user.role) {
@@ -30,8 +30,9 @@ const LoginPage = () => {
       } else {
         toast.error('Invalid email or password');
       }
+    } finally {
       setLoading(false);
-    }, 400);
+    }
   };
 
   return (

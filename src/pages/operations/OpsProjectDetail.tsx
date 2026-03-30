@@ -1,3 +1,4 @@
+import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
@@ -17,8 +18,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
-import { Plus, FileText, CheckCircle, Trash2 } from 'lucide-react';
+import { Plus, FileText, CheckCircle, Trash2, Download } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
+import { downloadDeliverable } from '@/utils/download';
 import { cn } from '@/lib/utils';
 
 const TASK_COLUMNS: { status: TaskStatus; label: string; color: string }[] = [
@@ -35,14 +37,28 @@ const OpsProjectDetail = () => {
   const [taskForm, setTaskForm] = useState({ title: '', description: '', category: '' as TaskCategory | '', priority: '' as Priority | '', dueDate: '' });
   const [, setRefresh] = useState(0);
 
+  const { data: project } = useQuery({ queryKey: ['project', id], queryFn: () => getProject(id!) });
+  
+  const { data: stages = [] } = useQuery({ 
+    queryKey: ['stages', id], 
+    queryFn: () => getStages(id!),
+    enabled: !!id
+  });
+  
+  const { data: deliverables = [] } = useQuery({ 
+    queryKey: ['deliverablesByProject', id], 
+    queryFn: () => getDeliverablesByProject(id!),
+    enabled: !!id
+  });
+  
+  const { data: tasks = [] } = useQuery({ 
+    queryKey: ['tasks', id], 
+    queryFn: () => getTasks(id!),
+    enabled: !!id
+  });
+
   if (!user || !id) return null;
-
-  const project = getProject(id);
-  if (!project) return <div className="text-center py-12 text-muted-foreground">Project not found</div>;
-
-  const stages = getStages(id);
-  const deliverables = getDeliverablesByProject(id);
-  const tasks = getTasks(id);
+  if (!project) return <div className="text-center py-12 text-muted-foreground">Loading or Project not found</div>;
 
   const handleAcknowledge = () => {
     acknowledgeHandoff(id, user.id, user.name);
@@ -232,12 +248,17 @@ const OpsProjectDetail = () => {
                     ) : (
                       <div className="space-y-2">
                         {stageDeliverables.map(d => (
-                          <div key={d.id} className="flex items-center gap-3 p-2 bg-muted/30 rounded text-sm">
-                            <FileText className="w-4 h-4 text-secondary shrink-0" />
-                            <div className="min-w-0 flex-1">
-                              <p className="font-medium truncate">{d.fileName}</p>
-                              <p className="text-xs text-muted-foreground">{d.fileType}</p>
+                          <div key={d.id} className="flex items-center justify-between p-2 bg-muted/30 rounded text-sm">
+                            <div className="flex items-center gap-3">
+                              <FileText className="w-4 h-4 text-secondary shrink-0" />
+                              <div className="min-w-0 flex-1">
+                                <p className="font-medium truncate">{d.fileName}</p>
+                                <p className="text-xs text-muted-foreground">{d.fileType}</p>
+                              </div>
                             </div>
+                            <Button variant="ghost" size="sm" onClick={() => downloadDeliverable(d.fileUrl, d.fileName, d.fileType)}>
+                              <Download className="w-4 h-4 text-muted-foreground" />
+                            </Button>
                           </div>
                         ))}
                       </div>

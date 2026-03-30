@@ -1,3 +1,4 @@
+import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
@@ -15,6 +16,7 @@ import { toast } from 'sonner';
 import { Check, X, FileText, MessageSquare, Download } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { DesignStage } from '@/types';
+import { downloadDeliverable } from '@/utils/download';
 
 const AdminProjectDetail = () => {
   const { id } = useParams<{ id: string }>();
@@ -23,21 +25,36 @@ const AdminProjectDetail = () => {
   const [comment, setComment] = useState('');
   const [, setRefresh] = useState(0);
 
-  if (!user || !id) return null;
-
-  const project = getProject(id);
-  if (!project) return <div className="text-center py-12 text-muted-foreground">Project not found</div>;
-
-  const stages = getStages(id);
-  const users = getUsers();
+  const { data: project } = useQuery({ queryKey: ['project', id], queryFn: () => getProject(id!) });
+  
+  const { data: stages = [] } = useQuery({ 
+    queryKey: ['stages', id], 
+    queryFn: () => getStages(id!),
+    enabled: !!id
+  });
+  
+  const { data: users = [] } = useQuery({ queryKey: ['users'], queryFn: () => getUsers() });
+  
   const activeStage = activeStageId ? stages.find(s => s.id === activeStageId) : stages.find(s => s.status === 'IN_PROGRESS' || s.status === 'PENDING_APPROVAL') || stages[0];
 
   if (!activeStageId && activeStage) {
     setTimeout(() => setActiveStageId(activeStage.id), 0);
   }
 
-  const deliverables = activeStage ? getDeliverables(activeStage.id) : [];
-  const comments = activeStage ? getComments(activeStage.id) : [];
+  const { data: deliverables = [] } = useQuery({ 
+    queryKey: ['deliverables', activeStage?.id], 
+    queryFn: () => getDeliverables(activeStage!.id),
+    enabled: !!activeStage
+  });
+
+  const { data: comments = [] } = useQuery({ 
+    queryKey: ['comments', activeStage?.id], 
+    queryFn: () => getComments(activeStage!.id),
+    enabled: !!activeStage
+  });
+
+  if (!user || !id) return null;
+  if (!project) return <div className="text-center py-12 text-muted-foreground">Loading or Project not found</div>;
 
   const handleApprove = (stage: DesignStage) => {
     approveStage(stage.id);
@@ -123,7 +140,7 @@ const AdminProjectDetail = () => {
                               {d.notes && <p className="text-xs text-muted-foreground mt-1 italic">{d.notes}</p>}
                             </div>
                           </div>
-                          <Button variant="ghost" size="sm"><Download className="w-3 h-3" /></Button>
+                          <Button variant="ghost" size="sm" onClick={() => downloadDeliverable(d.fileUrl, d.fileName, d.fileType)}><Download className="w-4 h-4" /></Button>
                         </div>
                       ))}
                     </div>

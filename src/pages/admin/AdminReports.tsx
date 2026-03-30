@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { getProjects, getStages } from '@/services/api';
+import { useQuery } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ProjectStatusBadge } from '@/components/StatusBadges';
 import { FileText, Download, CheckCircle, Clock } from 'lucide-react';
@@ -7,13 +8,13 @@ import { Project, DesignStage } from '@/types';
 import { format } from 'date-fns';
 
 const AdminReports = () => {
-  const projects = getProjects();
+  const { data: projects = [] } = useQuery({ queryKey: ['projects'], queryFn: () => getProjects() });
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [projectStages, setProjectStages] = useState<DesignStage[]>([]);
 
-  const handleSelectProject = (project: Project) => {
+  const handleSelectProject = async (project: Project) => {
     setSelectedProject(project);
-    setProjectStages(getStages(project.id));
+    setProjectStages(await getStages(project.id));
   };
 
   const handleGenerateReport = (stage: DesignStage) => {
