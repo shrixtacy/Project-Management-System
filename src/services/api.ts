@@ -211,17 +211,20 @@ export async function updateProject(id: string, data: Partial<Project>): Promise
 }
 
 export async function deleteProject(id: string): Promise<boolean> {
-  // Route through backend using service role key to bypass RLS
   const { data: sessionData } = await supabase.auth.getSession();
   if (!sessionData?.session) throw new Error('Not authenticated');
 
-  const res = await fetch(`${BACKEND_URL}/upload/delete-project`, {
+  // Use relative URL so it hits the Vercel serverless function in production
+  // and falls back to BACKEND_URL only for local dev
+  const deleteUrl = import.meta.env.PROD
+    ? `/api/auth/delete-project/${id}`
+    : `${BACKEND_URL}/auth/delete-project/${id}`;
+
+  const res = await fetch(deleteUrl, {
     method: 'DELETE',
     headers: {
-      'Content-Type': 'application/json',
       'Authorization': `Bearer ${sessionData.session.access_token}`
-    },
-    body: JSON.stringify({ projectId: id })
+    }
   });
 
   const result = await res.json();
