@@ -211,35 +211,27 @@ export async function updateProject(id: string, data: Partial<Project>): Promise
 }
 
 export async function deleteProject(id: string): Promise<boolean> {
-  const { data: sessionData } = await supabase.auth.getSession();
-  if (!sessionData?.session) throw new Error('Not authenticated');
-
-  // Fetch deliverables BEFORE deleting the project so Cloudinary cleanup still works
+  // 1. Grab Cloudinary URLs before deletion (cascade will wipe deliverables)
   let cloudinaryUrls: string[] = [];
   try {
     const deliverables = await getDeliverablesByProject(id);
-    cloudinaryUrls = deliverables.map(d => d.fileUrl).filter(url => url.includes('cloudinary.com'));
+    cloudinaryUrls = deliverables
+      .map(d => d.fileUrl)
+      .filter(url => url.includes('cloudinary.com'));
   } catch (err) {
-    console.warn('Could not fetch deliverables for Cloudinary cleanup (non-critical):', err);
+    console.warn('Could not fetch deliverables for Cloudinary cleanup:', err);
   }
 
-  // Always use a relative path — works on Vercel (serverless) and local dev via Vite proxy
-  const res = await fetch(`/api/auth/delete-project/${id}`, {
-    method: 'DELETE',
-    headers: {
-      'Authorization': `Bearer ${sessionData.session.access_token}`
-    }
-  });
+  // 2. Delete project — RLS policy allows ADMIN; CASCADE handles all child rows
+  const { error } = await supabase.from('projects').delete().eq('id', id);
+  if (error) throw new Error(error.message);
 
-  const result = await res.json();
-  if (!res.ok) throw new Error(result.error || 'Failed to delete project');
-
-  // Best-effort Cloudinary cleanup — fire and forget
+  // 3. Best-effort Cloudinary cleanup (fire and forget)
   if (cloudinaryUrls.length > 0) {
     fetch('/api/upload/delete-files', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ urls: cloudinaryUrls })
+      body: JSON.stringify({ urls: cloudinaryUrls }),
     }).catch(err => console.warn('Cloudinary cleanup failed (non-critical):', err));
   }
 
