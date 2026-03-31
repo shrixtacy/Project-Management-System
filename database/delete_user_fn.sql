@@ -19,9 +19,13 @@ BEGIN
     RAISE EXCEPTION 'Cannot delete your own account';
   END IF;
 
-  -- Nullify project assignments so delete is not blocked by FK constraints
+  -- Nullify all FK references before deleting
   UPDATE public.projects SET assigned_designer_id = NULL WHERE assigned_designer_id = target_user_id;
   UPDATE public.projects SET assigned_ops_id = NULL WHERE assigned_ops_id = target_user_id;
+  UPDATE public.audit_logs SET user_id = NULL WHERE user_id = target_user_id;
+  UPDATE public.ops_tasks SET assigned_to = NULL WHERE assigned_to = target_user_id;
+  UPDATE public.deliverables SET uploaded_by = NULL WHERE uploaded_by = target_user_id;
+  UPDATE public.comments SET user_id = NULL WHERE user_id = target_user_id;
 
   -- Delete from auth.users — cascades to public.users automatically
   DELETE FROM auth.users WHERE id = target_user_id;
