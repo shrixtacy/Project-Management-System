@@ -211,31 +211,28 @@ export async function updateProject(id: string, data: Partial<Project>): Promise
 }
 
 export async function deleteProject(id: string): Promise<boolean> {
-  // 1. Grab Cloudinary URLs before deletion (cascade will wipe deliverables)
-  let cloudinaryUrls: string[] = [];
+  const { data: sessionData } = await supabase.auth.getSession();
+  if (!sessionData?.session) throw new Error('Not authenticated');
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000); // 15s timeout
+
   try {
-    const deliverables = await getDeliverablesByProject(id);
-    cloudinaryUrls = deliverables
-      .map(d => d.fileUrl)
-      .filter(url => url.includes('cloudinary.com'));
-  } catch (err) {
-    console.warn('Could not fetch deliverables for Cloudinary cleanup:', err);
+    const res = await fetch(`/api/auth/delete-project/${id}`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${sessionData.session.access_token}` },
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'Failed to delete project');
+    return true;
+  } catch (err: any) {
+    clearTimeout(timeout);
+    if (err.name === 'AbortError') throw new Error('Request timed out');
+    throw err;
   }
-
-  // 2. Delete project — RLS policy allows ADMIN; CASCADE handles all child rows
-  const { error } = await supabase.from('projects').delete().eq('id', id);
-  if (error) throw new Error(error.message);
-
-  // 3. Best-effort Cloudinary cleanup (fire and forget)
-  if (cloudinaryUrls.length > 0) {
-    fetch('/api/upload/delete-files', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ urls: cloudinaryUrls }),
-    }).catch(err => console.warn('Cloudinary cleanup failed (non-critical):', err));
-  }
-
-  return true;
 }
 
 // ==================== STAGES ====================
