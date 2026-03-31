@@ -211,28 +211,9 @@ export async function updateProject(id: string, data: Partial<Project>): Promise
 }
 
 export async function deleteProject(id: string): Promise<boolean> {
-  const { data: sessionData } = await supabase.auth.getSession();
-  if (!sessionData?.session) throw new Error('Not authenticated');
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15000); // 15s timeout
-
-  try {
-    const res = await fetch(`/api/auth/delete-project/${id}`, {
-      method: 'DELETE',
-      headers: { 'Authorization': `Bearer ${sessionData.session.access_token}` },
-      signal: controller.signal,
-    });
-    clearTimeout(timeout);
-
-    const result = await res.json();
-    if (!res.ok) throw new Error(result.error || 'Failed to delete project');
-    return true;
-  } catch (err: any) {
-    clearTimeout(timeout);
-    if (err.name === 'AbortError') throw new Error('Request timed out');
-    throw err;
-  }
+  const { error } = await supabase.rpc('delete_project', { project_id: id });
+  if (error) throw new Error(error.message);
+  return true;
 }
 
 // ==================== STAGES ====================
