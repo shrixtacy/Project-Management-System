@@ -8,8 +8,17 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Request logger for Vercel logs
+app.use((req, res, next) => {
+  console.log(`[Vercel API] ${req.method} ${req.url}`);
+  next();
+});
+
+// Mount routes on both /api and root paths to handle Vercel rewrites gracefully
 app.use('/api/auth', authRoutes as any);
 app.use('/api/upload', uploadRoutes as any);
+app.use('/auth', authRoutes as any);
+app.use('/upload', uploadRoutes as any);
 
 app.get('/api/health', (req, res) => {
   res.json({ 
