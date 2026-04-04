@@ -189,4 +189,12 @@ app.delete('/api/upload/delete-project', requireAdmin, async (req, res) => {
   }
 });
 
-export default serverless(app);
+const handler = serverless(app);
+export default handler;
+
+// Vercel-specific: disable body parsing so multer can handle multipart uploads
+export const config = {
+  api: {
+    bodyParser: false,
+  },
+};

@@ -1,4 +1,7 @@
 {
+  "framework": "vite",
+  "buildCommand": "vite build",
+  "outputDirectory": "dist",
   "rewrites": [
     { "source": "/api/auth/(.*)", "destination": "/api/auth/[...path]" },
     { "source": "/api/upload/(.*)", "destination": "/api/upload/[...path]" },
