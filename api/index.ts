@@ -1,29 +1,40 @@
 import express from 'express';
 import cors from 'cors';
-import authRoutes from '../backend/src/routes/auth.js';
-import uploadRoutes from '../backend/src/routes/upload.js';
 
 const app = express();
-
 app.use(cors());
 app.use(express.json());
 
-// Request logger for Vercel logs
+let authRoutes: any = null;
+let uploadRoutes: any = null;
+let importError: string | null = null;
+
+// Use top-level await to catch import issues at runtime
+try {
+  const [authMod, uploadMod] = await Promise.all([
+    import('../backend/src/routes/auth.js'),
+    import('../backend/src/routes/upload.js')
+  ]);
+  authRoutes = authMod.default;
+  uploadRoutes = uploadMod.default;
+  console.log('[Vercel API] Routes imported successfully');
+} catch (err: any) {
+  importError = err.message;
+  console.error('[Vercel API] Fatal Import Error:', err);
+}
+
+// Request logger
 app.use((req, res, next) => {
-  console.log(`[Vercel API] ${req.method} ${req.url}`);
+  console.log(`[Vercel API Request] ${req.method} ${req.url}`);
   next();
 });
 
-// Mount routes on both /api and root paths to handle Vercel rewrites gracefully
-app.use('/api/auth', authRoutes as any);
-app.use('/api/upload', uploadRoutes as any);
-app.use('/auth', authRoutes as any);
-app.use('/upload', uploadRoutes as any);
-
+// Connectivity Check
 app.get('/api/health', (req, res) => {
   res.json({ 
-    status: 'ok', 
+    status: importError ? 'degraded' : 'ok', 
     message: 'PMS Backend is running on Vercel.',
+    importError,
     env: {
       hasSupabase: !!process.env.SUPABASE_URL,
       hasCloudinary: !!process.env.CLOUDINARY_CLOUD_NAME
@@ -31,14 +42,16 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// Global Error Handler to prevent HTML 500 pages
-app.use((err: any, req: any, res: any, next: any) => {
-  console.error('Vercel API Error:', err);
-  res.status(500).json({ 
-    error: 'Internal Server Error', 
-    message: err.message,
-    stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
-  });
+// Only mount routes if they were actually imported
+if (authRoutes) app.use(['/api/auth', '/auth'], authRoutes);
+if (uploadRoutes) app.use(['/api/upload', '/upload'], uploadRoutes);
+
+// Catch-all for diagnostics
+app.use('*', (req, res) => {
+  if (importError) {
+    return res.status(500).json({ error: 'Backend Initialization Failed', details: importError });
+  }
+  res.status(404).json({ error: 'Route not found', path: req.originalUrl });
 });
 
 export default app;
