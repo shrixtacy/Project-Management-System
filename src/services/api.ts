@@ -252,23 +252,37 @@ export async function submitStageForApproval(stageId: string): Promise<void> { a
 
 // ==================== DELIVERABLES ====================
 export async function addDeliverable(data: { stageId: string; file: File; notes?: string; uploadedBy: string }): Promise<StageDeliverable> {
+  // 1. Get auth signature and cloud details from backend
+  const sigRes = await fetch(`${BACKEND_URL}/upload/signature`);
+  if (!sigRes.ok) throw new Error('Failed to get upload signature');
+  const { timestamp, signature, cloudName, apiKey } = await sigRes.json();
+
+  if (!cloudName || !apiKey) {
+    throw new Error('Cloudinary configuration is missing from backend.');
+  }
+
+  // 2. Upload file directly to Cloudinary (bypassing Vercel 4.5MB Serverless limit)
   const formData = new FormData();
   formData.append('file', data.file);
+  formData.append('api_key', apiKey);
+  formData.append('timestamp', timestamp.toString());
+  formData.append('signature', signature);
+  formData.append('folder', 'pms_deliverables');
   
-  // Upload to Cloudinary via backend
-  const res = await fetch(`${BACKEND_URL}/upload`, {
+  const uploadRes = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/raw/upload`, {
     method: 'POST',
     body: formData
   });
   
-  const uploadResult = await res.json();
-  if (!res.ok) throw new Error(uploadResult.error || 'Upload failed');
+  const uploadResult = await uploadRes.json();
+  if (!uploadRes.ok) throw new Error(uploadResult.error?.message || 'Cloudinary upload failed');
   
+  // 3. Save reference in the database
   const { data: deliverable, error } = await supabase.from('deliverables').insert([{
     stage_id: data.stageId,
     file_name: data.file.name,
-    file_url: uploadResult.url,
-    file_type: uploadResult.format === 'zip' ? 'application/zip' : data.file.type,
+    file_url: uploadResult.secure_url,
+    file_type: uploadResult.format === 'zip' ? 'application/zip' : data.file.type || 'application/octet-stream',
     uploaded_by: data.uploadedBy,
     notes: data.notes || null
   }]).select().single();

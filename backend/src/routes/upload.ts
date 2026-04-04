@@ -96,8 +96,6 @@ router.get('/proxy-download', async (req, res) => {
 
     let fetchUrl = fileUrl;
 
-    // For Cloudinary raw resources, use the Admin API to get a direct download URL
-    // Direct fetch of raw URLs returns 401 even for "public" files when fetched server-side
     if (fileUrl.includes('cloudinary.com') && fileUrl.includes('/raw/upload/')) {
       try {
         const urlObj = new URL(fileUrl);
@@ -107,18 +105,12 @@ router.get('/proxy-download', async (req, res) => {
           const publicId = withoutVersion;
           console.log(`Backend: Fetching raw asset via Admin API for public_id: ${publicId}`);
 
-          // Use cloudinary.api.resource to get the secure_url with auth baked in
-          const asset = await cloudinary.api.resource(publicId, { resource_type: 'raw' });
-          console.log(`Backend: Asset type: ${asset.type}, access_mode: ${asset.access_mode}`);
-
-          // Generate a short-lived private download URL — works regardless of access_mode
-          // This is the most reliable way to fetch raw files server-side
           fetchUrl = cloudinary.utils.private_download_url(publicId, ext.replace('.', '') || 'pdf', {
             resource_type: 'raw',
             type: 'upload',
             expires_at: Math.floor(Date.now() / 1000) + 60, // valid for 60 seconds
           });
-          console.log(`Backend: Using private_download_url`);
+          console.log(`Backend: Using private_download_url: ${fetchUrl}`);
         }
       } catch (signErr: any) {
         console.warn('Backend: Admin API approach failed, falling back to original URL:', signErr.message);
@@ -126,36 +118,10 @@ router.get('/proxy-download', async (req, res) => {
       }
     }
 
-    const response = await axios.get(fetchUrl, {
-      responseType: 'arraybuffer',
-      maxRedirects: 10,
-      timeout: 30000,
-      headers: {
-        'Accept': '*/*',
-        'User-Agent': 'Mozilla/5.0',
-      },
-    });
-
-    const buffer = Buffer.from(response.data);
-
-    // Cloudinary often returns 'text/plain' or 'application/octet-stream' for raw files
-    // Override with extension-based MIME when that happens
-    let contentType = response.headers['content-type'] || 'application/octet-stream';
-    if (contentType.startsWith('text/plain') || contentType === 'application/octet-stream') {
-      contentType = extToMime[ext] || 'application/octet-stream';
-    }
-
-    res.setHeader('Content-Type', contentType);
-    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(fileName)}"`);
-    res.setHeader('Content-Length', buffer.length);
-    res.send(buffer);
+    // Bypass Vercel Edge Serverless 4.5MB limits by redirecting the client to Cloudinary directly!
+    return res.redirect(302, fetchUrl);
   } catch (error: any) {
     console.error('Backend: Proxy catch:', error.message);
-    if (error.response) {
-      console.error(`Backend: Storage responded with ${error.response.status}`);
-      const statusCode = error.response.status >= 400 ? error.response.status : 502;
-      return res.status(statusCode).json({ error: `Storage error: ${error.response.status}` });
-    }
     res.status(500).json({ error: error.message });
   }
 });
@@ -167,7 +133,12 @@ router.get('/signature', (req, res) => {
       { timestamp, folder: 'pms_deliverables' },
       process.env.CLOUDINARY_API_SECRET!
     );
-    res.status(200).json({ timestamp, signature });
+    res.status(200).json({ 
+      timestamp, 
+      signature,
+      cloudName: process.env.CLOUDINARY_CLOUD_NAME,
+      apiKey: process.env.CLOUDINARY_API_KEY
+    });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
