@@ -128,19 +128,31 @@ router.get('/proxy-download', async (req, res) => {
 
 router.get('/signature', (req, res) => {
   try {
+    const apiSecret = process.env.CLOUDINARY_API_SECRET;
+    const apiKey = process.env.CLOUDINARY_API_KEY;
+    const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
+
+    if (!apiSecret || !apiKey || !cloudName) {
+      console.error('Backend: Cloudinary config missing (Secret/Key/CloudName)');
+      return res.status(500).json({ 
+        error: 'Cloudinary configuration is missing on the server. Please check Vercel environment variables (CLOUDINARY_API_SECRET, API_KEY, CLOUD_NAME).' 
+      });
+    }
+
     const timestamp = Math.round(new Date().getTime() / 1000);
     const signature = cloudinary.utils.api_sign_request(
       { timestamp, folder: 'pms_deliverables' },
-      process.env.CLOUDINARY_API_SECRET!
+      apiSecret
     );
     res.status(200).json({ 
       timestamp, 
       signature,
-      cloudName: process.env.CLOUDINARY_CLOUD_NAME,
-      apiKey: process.env.CLOUDINARY_API_KEY
+      cloudName,
+      apiKey
     });
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    console.error('Backend: Signature generation error:', error);
+    res.status(500).json({ error: 'Failed to generate upload signature: ' + error.message });
   }
 });
 
