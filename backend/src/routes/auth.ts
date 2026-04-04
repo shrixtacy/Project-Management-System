@@ -12,13 +12,24 @@ const router = Router();
 const supabaseUrl = process.env.SUPABASE_URL || '';
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
-const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
-  auth: { autoRefreshToken: false, persistSession: false }
-});
+let supabaseAdmin: any = null;
+try {
+  if (supabaseUrl && supabaseServiceKey) {
+    supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
+      auth: { autoRefreshToken: false, persistSession: false }
+    });
+  }
+} catch (e) {
+  console.warn("Backend: Failed to initialize Supabase Admin. Env vars missing?");
+}
 
 // Middleware to verify if the requester is an ADMIN
 // (In a production app, verify the JWT from the frontend. Here we simplify by expecting an adminId header)
 const requireAdmin = async (req: Request, res: Response, next: NextFunction) => {
+  if (!supabaseAdmin) {
+    return res.status(500).json({ error: 'Supabase Server Credentials (SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY) are missing on the Backend.' });
+  }
+  
   const authHeader = req.headers.authorization;
   if (!authHeader) return res.status(401).json({ error: 'Missing Authorization header' });
   
