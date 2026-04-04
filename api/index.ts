@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
-import authRoutes from '../backend/src/routes/auth';
-import uploadRoutes from '../backend/src/routes/upload';
+import authRoutes from '../backend/src/routes/auth.js';
+import uploadRoutes from '../backend/src/routes/upload.js';
 
 const app = express();
 
