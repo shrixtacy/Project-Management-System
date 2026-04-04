@@ -1,10 +1,10 @@
 {
-  "framework": "vite",
   "buildCommand": "vite build",
   "outputDirectory": "dist",
-  "rewrites": [
-    { "source": "/api/auth/(.*)", "destination": "/api/auth/[...path]" },
-    { "source": "/api/upload/(.*)", "destination": "/api/upload/[...path]" },
-    { "source": "/(.*)", "destination": "/index.html" }
+  "routes": [
+    { "src": "/api/auth/(.*)", "dest": "/api/auth/[...path].ts" },
+    { "src": "/api/upload/(.*)", "dest": "/api/upload/[...path].ts" },
+    { "handle": "filesystem" },
+    { "src": "/(.*)", "dest": "/index.html" }
   ]
 }
