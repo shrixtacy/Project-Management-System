@@ -254,7 +254,14 @@ export async function submitStageForApproval(stageId: string): Promise<void> { a
 export async function addDeliverable(data: { stageId: string; file: File; notes?: string; uploadedBy: string }): Promise<StageDeliverable> {
   // 1. Get auth signature and cloud details from backend
   const sigRes = await fetch(`${BACKEND_URL}/upload/signature`);
-  if (!sigRes.ok) throw new Error('Failed to get upload signature');
+  if (!sigRes.ok) {
+    let errMsg = 'Failed to get upload signature';
+    try {
+      const errBody = await sigRes.json();
+      if (errBody.error) errMsg += `: ${errBody.error}`;
+    } catch (e) {}
+    throw new Error(errMsg);
+  }
   const { timestamp, signature, cloudName, apiKey } = await sigRes.json();
 
   if (!cloudName || !apiKey) {
