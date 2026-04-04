@@ -1,12 +1,9 @@
 import { Router } from 'express';
 import { v2 as cloudinary } from 'cloudinary';
 import multer from 'multer';
-import dotenv from 'dotenv';
-import path from 'path';
 import { Readable, PassThrough } from 'stream';
 import axios from 'axios';
-
-dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
+import path from 'path';
 
 const router = Router();
 
