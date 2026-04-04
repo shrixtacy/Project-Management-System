@@ -12,7 +12,24 @@ app.use('/api/auth', authRoutes as any);
 app.use('/api/upload', uploadRoutes as any);
 
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', message: 'PMS Backend is running on Vercel.' });
+  res.json({ 
+    status: 'ok', 
+    message: 'PMS Backend is running on Vercel.',
+    env: {
+      hasSupabase: !!process.env.SUPABASE_URL,
+      hasCloudinary: !!process.env.CLOUDINARY_CLOUD_NAME
+    }
+  });
+});
+
+// Global Error Handler to prevent HTML 500 pages
+app.use((err: any, req: any, res: any, next: any) => {
+  console.error('Vercel API Error:', err);
+  res.status(500).json({ 
+    error: 'Internal Server Error', 
+    message: err.message,
+    stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
+  });
 });
 
 export default app;
