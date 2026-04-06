@@ -1,7 +1,7 @@
 import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 
-const KPICard = ({ title, value, subtitle, icon }: { title: string; value: string | number; subtitle?: string; icon: React.ReactNode }) => (
+const KPICard = ({ title, value, subtitle, icon, iconBg }: { title: string; value: string | number; subtitle?: string; icon: React.ReactNode; iconBg?: string }) => (
   <Card className="glass-panel border-white/5">
     <CardContent className="p-5">
       <div className="flex items-start justify-between">
@@ -10,7 +10,7 @@ const KPICard = ({ title, value, subtitle, icon }: { title: string; value: strin
           <p className="text-2xl font-display font-bold text-foreground mt-1">{value}</p>
           {subtitle && <p className="text-xs text-muted-foreground mt-1">{subtitle}</p>}
         </div>
-        <div className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center text-secondary">
+        <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${iconBg || 'bg-muted text-secondary'}`}>
           {icon}
         </div>
       </div>

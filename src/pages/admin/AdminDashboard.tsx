@@ -33,10 +33,10 @@ const AdminDashboard = () => {
 
       {/* KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <KPICard title="Total Projects" value={projects.length} subtitle={`${users.length} team members`} icon={<FolderKanban className="w-5 h-5" />} />
-        <KPICard title="In Design" value={designCount} subtitle="Active design phase" icon={<Paintbrush className="w-5 h-5" />} />
-        <KPICard title="In Operations" value={opsCount} subtitle="Execution phase" icon={<Hammer className="w-5 h-5" />} />
-        <KPICard title="Completed" value={completedCount} subtitle="This month" icon={<CheckCircle className="w-5 h-5" />} />
+        <KPICard title="Total Projects" value={projects.length} subtitle={`${users.length} team members`} icon={<FolderKanban className="w-5 h-5" />} iconBg="bg-blue-500/20 text-blue-400" />
+        <KPICard title="In Design" value={designCount} subtitle="Active design phase" icon={<Paintbrush className="w-5 h-5" />} iconBg="bg-purple-500/20 text-purple-400" />
+        <KPICard title="In Operations" value={opsCount} subtitle="Execution phase" icon={<Hammer className="w-5 h-5" />} iconBg="bg-orange-500/20 text-orange-400" />
+        <KPICard title="Completed" value={completedCount} subtitle="This month" icon={<CheckCircle className="w-5 h-5" />} iconBg="bg-green-500/20 text-green-400" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
