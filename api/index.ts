@@ -37,7 +37,6 @@ const requireAdmin = async (req: Request, res: Response, next: NextFunction) => 
 
   const { data: userData } = await supabaseAdmin
     .from('users').select('role').eq('id', user.id).single();
-
   if (!userData || userData.role !== 'ADMIN')
     return res.status(403).json({ error: 'Forbidden' });
 
