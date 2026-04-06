@@ -35,9 +35,13 @@ const requireAdmin = async (req: Request, res: Response, next: NextFunction) => 
   const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
   if (error || !user) return res.status(401).json({ error: 'Invalid token' });
 
+  // Check JWT metadata first (fast, no DB call)
+  const metaRole = user.user_metadata?.role || user.app_metadata?.role;
+  if (metaRole === 'ADMIN') return next();
+
+  // Fallback: check DB (for manually-created admins whose metadata may not have role)
   const { data: userData } = await supabaseAdmin
     .from('users').select('role').eq('id', user.id).single();
-
   if (!userData || userData.role !== 'ADMIN')
     return res.status(403).json({ error: 'Forbidden' });
 
