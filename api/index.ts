@@ -109,10 +109,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           const parts = new URL(fileUrl).pathname.split('/raw/upload/');
           if (parts.length === 2) {
             const publicId = parts[1].replace(/^v\d+\//, '');
-            fetchUrl = cloudinary.utils.private_download_url(publicId, ext.replace('.', '') || 'pdf', {
-              resource_type: 'raw', type: 'upload',
-              expires_at: Math.floor(Date.now() / 1000) + 60,
-            });
+            // private_download_url generates a signed URL that forces attachment download
+            fetchUrl = cloudinary.utils.private_download_url(publicId, ext.replace('.', '') || 'bin', {
+              resource_type: 'raw',
+              type: 'upload',
+              expires_at: Math.floor(Date.now() / 1000) + 300, // 5 min
+              attachment: true,
+            } as any);
           }
         } catch (e: any) {
           console.warn('Signed URL failed, using original:', e.message);
