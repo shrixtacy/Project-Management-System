@@ -26,6 +26,7 @@ BEGIN
   UPDATE public.ops_tasks SET assigned_to = NULL WHERE assigned_to = target_user_id;
   UPDATE public.deliverables SET uploaded_by = NULL WHERE uploaded_by = target_user_id;
   UPDATE public.comments SET user_id = NULL WHERE user_id = target_user_id;
+  DELETE FROM public.notifications WHERE user_id = target_user_id;
 
   -- Delete from auth.users — cascades to public.users automatically
   DELETE FROM auth.users WHERE id = target_user_id;
